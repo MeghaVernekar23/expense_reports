@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import Float, ForeignKey, String, create_engine
+from sqlalchemy import Boolean, Float, ForeignKey, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 DB_PATH = Path(__file__).parent / "expenses.db"
@@ -26,6 +26,9 @@ class Category(Base):
     budget: Mapped[float] = mapped_column(Float, nullable=False, default=0)
     period_start: Mapped[str | None] = mapped_column(String, nullable=True)
     period_end: Mapped[str | None] = mapped_column(String, nullable=True)
+    # manual on/off switch — independent of the period dates. Only active
+    # categories show on the dashboard / are selectable when logging spend.
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     expenses: Mapped[list["Expense"]] = relationship(
         back_populates="category", cascade="all, delete-orphan"
@@ -59,6 +62,7 @@ class CategoryIn(BaseModel):
     budget: float = Field(ge=0)
     period_start: str | None = None
     period_end: str | None = None
+    is_active: bool = True
 
 
 class CategoryOut(BaseModel):
@@ -69,6 +73,7 @@ class CategoryOut(BaseModel):
     budget: float
     period_start: str | None
     period_end: str | None
+    is_active: bool
 
     @property
     def month_label(self) -> str:

@@ -56,8 +56,10 @@ def _to_expense_out(e: Expense) -> ExpenseOut:
 
 # ---------- Categories ----------
 
-def add_category(name: str, budget: float, start: str | None, end: str | None) -> CategoryOut:
-    data = CategoryIn(name=name.strip(), budget=budget, period_start=start, period_end=end)
+def add_category(
+    name: str, budget: float, start: str | None, end: str | None, is_active: bool = True
+) -> CategoryOut:
+    data = CategoryIn(name=name.strip(), budget=budget, period_start=start, period_end=end, is_active=is_active)
     with get_session() as session:
         category = Category(**data.model_dump())
         session.add(category)
@@ -65,14 +67,32 @@ def add_category(name: str, budget: float, start: str | None, end: str | None) -
         return CategoryOut.model_validate(category)
 
 
-def update_category(cat_id: int, name: str, budget: float, start: str | None, end: str | None) -> CategoryOut | None:
-    data = CategoryIn(name=name.strip(), budget=budget, period_start=start, period_end=end)
+def update_category(
+    cat_id: int, name: str, budget: float, start: str | None, end: str | None, is_active: bool | None = None
+) -> CategoryOut | None:
     with get_session() as session:
         category = session.get(Category, cat_id)
         if category is None:
             return None
+        data = CategoryIn(
+            name=name.strip(),
+            budget=budget,
+            period_start=start,
+            period_end=end,
+            is_active=category.is_active if is_active is None else is_active,
+        )
         for field, value in data.model_dump().items():
             setattr(category, field, value)
+        session.flush()
+        return CategoryOut.model_validate(category)
+
+
+def set_category_active(cat_id: int, is_active: bool) -> CategoryOut | None:
+    with get_session() as session:
+        category = session.get(Category, cat_id)
+        if category is None:
+            return None
+        category.is_active = is_active
         session.flush()
         return CategoryOut.model_validate(category)
 
