@@ -326,7 +326,7 @@ def page_shell(active_path: str):
     after calling this, or simply continues writing widgets — this
     function itself opens the wrapping column context and returns it."""
     ui.add_head_html(HEAD_HTML)
-    ui.page_title("Nikhil and Megha Ledger")
+    ui.page_title("Expense Report")
 
     with ui.header().classes("app-header").props("elevated=false").style("padding: 0;"):
         with ui.row().classes("w-full items-center no-wrap").style(
@@ -599,42 +599,53 @@ def render_summary(container: ui.column, refresh_all):
                             ui.label(cat.name).style(f"font-weight: 600; font-size: 15px; color: {INK};")
                             ui.label(cat.month_label).style(f"font-size: 11px; color:{MUTED};")
 
-                        # A single menu button for all card actions — putting them
-                        # behind one click target (rather than icons living inside
-                        # the card's own click area) avoids fighting the card's
-                        # "open expenses" click handler for the same click.
-                        with ui.button(icon="more_vert").props("flat round dense size=sm").style(
-                            f"color:{MUTED}; flex: none;"
-                        ).on("click.stop", lambda: None):
-                            with ui.menu() as menu:
-                                with ui.menu_item(
-                                    on_click=lambda c=cat: (menu.close(), open_new_period_dialog(c, refresh_all))
-                                ):
-                                    with ui.row().classes("items-center").style("gap: 8px;"):
-                                        ui.icon("event_repeat", size="18px")
-                                        ui.label("Start next period")
-                                with ui.menu_item(
-                                    on_click=lambda c=cat: (
-                                        menu.close(),
-                                        toggle_active_and_refresh(c, False, refresh_all),
-                                    )
-                                ):
-                                    with ui.row().classes("items-center").style("gap: 8px;"):
-                                        ui.icon("toggle_off", size="18px")
-                                        ui.label("Deactivate")
-                                with ui.menu_item(
-                                    on_click=lambda c=cat: (menu.close(), open_edit_dialog(c, refresh_all))
-                                ):
-                                    with ui.row().classes("items-center").style("gap: 8px;"):
-                                        ui.icon("edit_outlined", size="18px")
-                                        ui.label("Edit")
-                                ui.separator()
-                                with ui.menu_item(
-                                    on_click=lambda c=cat: (menu.close(), confirm_delete_category(c, refresh_all))
-                                ):
-                                    with ui.row().classes("items-center").style(f"gap: 8px; color:{CRITICAL};"):
-                                        ui.icon("delete_outline", size="18px")
-                                        ui.label("Delete")
+                        with ui.row().style("gap: 2px; flex: none;"):
+                            # Log a spend is the primary quick action, so it gets
+                            # its own always-visible button (pre-filled with this
+                            # category) rather than living inside the ⋮ menu.
+                            ui.button(
+                                icon="add_card",
+                                on_click=lambda c=cat: open_quick_log_dialog(c, refresh_all),
+                            ).props("flat round dense size=sm").style(f"color:{ACCENT}").tooltip(
+                                "Log a spend"
+                            ).on("click.stop", lambda: None)
+
+                            # A single menu button for the remaining, less-frequent
+                            # actions — putting them behind one click target (rather
+                            # than loose icons inside the card's own click area)
+                            # avoids fighting the card's "open expenses" handler.
+                            with ui.button(icon="more_vert").props("flat round dense size=sm").style(
+                                f"color:{MUTED}; flex: none;"
+                            ).on("click.stop", lambda: None):
+                                with ui.menu() as menu:
+                                    with ui.menu_item(
+                                        on_click=lambda c=cat: (menu.close(), open_new_period_dialog(c, refresh_all))
+                                    ):
+                                        with ui.row().classes("items-center").style("gap: 8px;"):
+                                            ui.icon("event_repeat", size="18px")
+                                            ui.label("Start next period")
+                                    with ui.menu_item(
+                                        on_click=lambda c=cat: (
+                                            menu.close(),
+                                            toggle_active_and_refresh(c, False, refresh_all),
+                                        )
+                                    ):
+                                        with ui.row().classes("items-center").style("gap: 8px;"):
+                                            ui.icon("toggle_off", size="18px")
+                                            ui.label("Deactivate")
+                                    with ui.menu_item(
+                                        on_click=lambda c=cat: (menu.close(), open_edit_dialog(c, refresh_all))
+                                    ):
+                                        with ui.row().classes("items-center").style("gap: 8px;"):
+                                            ui.icon("edit_outlined", size="18px")
+                                            ui.label("Edit")
+                                    ui.separator()
+                                    with ui.menu_item(
+                                        on_click=lambda c=cat: (menu.close(), confirm_delete_category(c, refresh_all))
+                                    ):
+                                        with ui.row().classes("items-center").style(f"gap: 8px; color:{CRITICAL};"):
+                                            ui.icon("delete_outline", size="18px")
+                                            ui.label("Delete")
 
                     with ui.row().classes("items-center").style("gap: 6px;"):
                         ui.element("div").style(
@@ -788,6 +799,26 @@ def open_category_expenses_dialog(cat, on_change):
         render_expense_list(
             expenses, on_row_change, empty_message="No spending logged in this category yet.", show_category=False
         )
+    dialog.open()
+
+
+def open_quick_log_dialog(cat, on_change):
+    """Log a spend straight from a category card, with that category
+    pre-filled — no need to leave the dashboard or re-pick it."""
+    with ui.dialog() as dialog, ui.card().classes("panel").style(
+        "padding: 20px 20px 4px; gap: 0; min-width: 340px; max-width: 460px;"
+    ):
+        with ui.row().classes("w-full items-center justify-between").style("margin-bottom: 8px;"):
+            ui.label(f'Log a spend · {cat.name}').style(f"font-weight: 600; color:{INK}; font-size: 15px;")
+            ui.button(icon="close", on_click=dialog.close).props("flat round dense size=sm").style(f"color:{MUTED}")
+
+        form_container = ui.column().classes("w-full")
+
+        def on_saved():
+            dialog.close()
+            on_change()
+
+        render_log_spend_form(form_container, preselect_category_id=cat.id, on_saved=on_saved)
     dialog.open()
 
 
@@ -1258,7 +1289,7 @@ def log_spend_page():
             render_log_spend_form(form_container)
 
 
-def render_log_spend_form(container: ui.column):
+def render_log_spend_form(container: ui.column, preselect_category_id: int | None = None, on_saved=None):
     container.clear()
     with container:
         with ui.column().classes("panel w-full").style("padding: 22px 24px; gap: 14px;"):
@@ -1273,7 +1304,8 @@ def render_log_spend_form(container: ui.column):
                 return
 
             options = {c.id: f"{c.name} · {c.month_label}" for c in cats}
-            category_select = ui.select(options, label="Category *", with_input=True).props(
+            default_category = preselect_category_id if preselect_category_id in options else None
+            category_select = ui.select(options, label="Category *", value=default_category, with_input=True).props(
                 "outlined dense"
             ).classes("w-full")
 
@@ -1354,6 +1386,8 @@ def render_log_spend_form(container: ui.column):
                 amount_input.value = None
                 note_input.value = ""
                 clear_pending_bill()
+                if on_saved:
+                    on_saved()
 
             ui.button("Add expense", icon="add", on_click=submit).props("unelevated no-caps").classes(
                 "accent-btn w-full"
@@ -1361,4 +1395,4 @@ def render_log_spend_form(container: ui.column):
 
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(title="Nikhil and Megha Ledger", favicon="📒", port=9000, reload=False)
+    ui.run(title="Expense Report", favicon="📒", port=9000, reload=False)
