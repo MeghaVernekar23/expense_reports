@@ -13,6 +13,18 @@ import storage
 
 storage.init_db()
 
+_original_notify = ui.notify
+
+
+def notify(message: str, **kwargs):
+    """ui.notify wrapper defaulting toasts to the top-center of the screen
+    instead of NiceGUI's bottom default, which gets lost below the fold."""
+    kwargs.setdefault("position", "top")
+    return _original_notify(message, **kwargs)
+
+
+ui.notify = notify
+
 BILLS_DIR = Path(__file__).parent / "bills"
 BILLS_DIR.mkdir(exist_ok=True)
 app.add_static_files("/bills", str(BILLS_DIR))
@@ -106,6 +118,57 @@ def pace_status(cat, spent: float) -> tuple[str, str]:
     if drift >= 8:
         return WARN, "Ahead of pace"
     return GOOD, "On track"
+
+
+def monthly_totals(expenses) -> list[tuple[str, float]]:
+    """Bucket expenses by calendar month (YYYY-MM), summed in EUR, sorted
+    chronologically. Calendar months are used here rather than each
+    category's own custom period, so spend lines up the same way no
+    matter how a category's billing cycle is dated (e.g. 14th-to-14th)."""
+    buckets: dict[str, float] = {}
+    for e in expenses:
+        d = parse_date(e.spent_on)
+        if d is None:
+            continue
+        key = d.strftime("%Y-%m")
+        buckets[key] = buckets.get(key, 0) + e.amount_eur
+    return sorted(buckets.items())
+
+
+def yearly_totals(expenses) -> list[tuple[str, float]]:
+    buckets: dict[str, float] = {}
+    for e in expenses:
+        d = parse_date(e.spent_on)
+        if d is None:
+            continue
+        key = d.strftime("%Y")
+        buckets[key] = buckets.get(key, 0) + e.amount_eur
+    return sorted(buckets.items())
+
+
+def monthly_daily_totals(expenses) -> list[tuple[date, float]]:
+    """Bucket a set of expenses by exact day, summed in EUR, sorted
+    chronologically — the line the dashboard's 'spend over time' chart
+    plots for whatever period the given expenses belong to."""
+    buckets: dict[date, float] = {}
+    for e in expenses:
+        d = parse_date(e.spent_on)
+        if d is None:
+            continue
+        buckets[d] = buckets.get(d, 0) + e.amount_eur
+    return sorted(buckets.items())
+
+
+def category_groups() -> dict[str, list]:
+    """All categories grouped by name, each group's periods sorted
+    chronologically — the basis for month-over-month analysis of a
+    recurring category like 'General'."""
+    groups: dict[str, list] = {}
+    for c in storage.get_categories():
+        groups.setdefault(c.name, []).append(c)
+    for group in groups.values():
+        group.sort(key=lambda c: c.period_start or "")
+    return groups
 
 
 def build_export_zip() -> bytes:
@@ -251,6 +314,7 @@ HEAD_HTML = f"""
 NAV_ITEMS = [
     ("/", "space_dashboard", "Dashboard"),
     ("/spending", "receipt_long", "Spending"),
+    ("/analysis", "insights", "Analysis"),
     ("/add-category", "add_box", "Add category"),
     ("/log-spend", "add_card", "Log a spend"),
 ]
@@ -322,15 +386,103 @@ def dashboard_page():
             page_header("Dashboard", "Active categories & overall totals", header_actions)
 
             totals_container = ui.column().classes("w-full").style("gap: 10px;")
+            charts_container = ui.column().classes("w-full").style("gap: 14px; margin-top: 24px;")
             summary_container = ui.column().classes("w-full").style("gap: 14px; margin-top: 24px;")
             history_container = ui.column().classes("w-full").style("gap: 10px; margin-top: 24px;")
 
             def refresh_all():
                 render_totals(totals_container)
+                render_dashboard_charts(charts_container)
                 render_summary(summary_container, refresh_all)
                 render_history(history_container, refresh_all)
 
             refresh_all()
+
+
+def render_dashboard_charts(container: ui.column):
+    container.clear()
+    active_cats = [c for c in storage.get_categories() if is_active_period(c)]
+    if not active_cats:
+        return
+
+    donut_data = [
+        {"name": c.name, "value": round(storage.get_total_spent(c.id), 2)}
+        for c in active_cats
+        if storage.get_total_spent(c.id) > 0
+    ]
+
+    active_expenses = [e for c in active_cats for e in storage.get_expenses(c.id)]
+    daily = monthly_daily_totals(active_expenses)
+
+    with container:
+        section_label("Active period at a glance")
+        with ui.row().classes("w-full items-start").style("gap: 14px; flex-wrap: wrap;"):
+            with ui.column().classes("panel").style("flex: 1 1 280px; min-width: 260px; padding: 16px;"):
+                ui.label("Spend by category").style(f"font-size: 12.5px; font-weight: 600; color:{INK};")
+                if donut_data:
+                    ui.echart(
+                        {
+                            "tooltip": {"trigger": "item", "valueFormatter": "value => '€' + value.toFixed(2)"},
+                            "legend": {
+                                "orient": "vertical",
+                                "right": 4,
+                                "top": "middle",
+                                "textStyle": {"color": MUTED, "fontSize": 11},
+                            },
+                            "series": [
+                                {
+                                    "type": "pie",
+                                    "radius": ["45%", "72%"],
+                                    "center": ["38%", "50%"],
+                                    "data": donut_data,
+                                    "label": {"show": False},
+                                    "itemStyle": {"borderColor": SURFACE, "borderWidth": 2},
+                                }
+                            ],
+                            "color": [ACCENT, GOOD, WARN, CRITICAL, "#8AA9C9", "#C9A26A"],
+                        }
+                    ).style("width: 100%; height: 220px;")
+                else:
+                    ui.label("No spend logged in the active period yet.").style(
+                        f"color:{MUTED}; font-size: 12.5px; padding: 40px 0;"
+                    )
+
+            with ui.column().classes("panel").style("flex: 1.4 1 320px; min-width: 280px; padding: 16px;"):
+                ui.label("Spend over time").style(f"font-size: 12.5px; font-weight: 600; color:{INK};")
+                if daily:
+                    labels = [d.strftime("%d %b") for d, _ in daily]
+                    values = [round(v, 2) for _, v in daily]
+                    ui.echart(
+                        {
+                            "grid": {"left": 46, "right": 12, "top": 20, "bottom": 30},
+                            "xAxis": {
+                                "type": "category",
+                                "data": labels,
+                                "axisLabel": {"color": MUTED, "fontSize": 10},
+                            },
+                            "yAxis": {
+                                "type": "value",
+                                "axisLine": {"show": False},
+                                "splitLine": {"lineStyle": {"color": BORDER, "type": "dashed"}},
+                                "axisLabel": {"color": MUTED, "fontSize": 11, "formatter": "€{value}"},
+                            },
+                            "tooltip": {"trigger": "axis", "valueFormatter": "value => '€' + value.toFixed(2)"},
+                            "series": [
+                                {
+                                    "type": "line",
+                                    "data": values,
+                                    "smooth": True,
+                                    "areaStyle": {"color": ACCENT_SOFT},
+                                    "itemStyle": {"color": ACCENT},
+                                    "showSymbol": len(values) <= 20,
+                                }
+                            ],
+                        }
+                    ).style("width: 100%; height: 220px;")
+                else:
+                    ui.label("No spend logged in the active period yet.").style(
+                        f"color:{MUTED}; font-size: 12.5px; padding: 40px 0;"
+                    )
 
 
 def render_totals(container: ui.column):
@@ -441,31 +593,48 @@ def render_summary(container: ui.column, refresh_all):
 
                 with ui.column().classes("stripe-card").style(
                     f"border-left-color: {color}; padding: 16px 18px; gap: 10px; cursor: pointer;"
-                ).on("click", lambda c=cat: open_category_expenses_dialog(c, refresh_all)) as card:
+                ).on("click", lambda c=cat: open_category_expenses_dialog(c, refresh_all)):
                     with ui.row().classes("w-full items-center justify-between no-wrap").style("gap: 8px;"):
                         with ui.column().style("gap: 1px; min-width: 0;"):
                             ui.label(cat.name).style(f"font-weight: 600; font-size: 15px; color: {INK};")
                             ui.label(cat.month_label).style(f"font-size: 11px; color:{MUTED};")
-                        with ui.row().style("gap: 0; flex: none;").on(
-                            "click.stop", lambda: None
-                        ):
-                            ui.button(
-                                icon="event_repeat",
-                                on_click=lambda c=cat: open_new_period_dialog(c, refresh_all),
-                            ).props("flat round dense size=sm").style(f"color:{MUTED}").tooltip(
-                                "Start next period"
-                            )
-                            ui.button(
-                                icon="toggle_off",
-                                on_click=lambda c=cat: toggle_active_and_refresh(c, False, refresh_all),
-                            ).props("flat round dense size=sm").style(f"color:{MUTED}").tooltip("Deactivate")
-                            ui.button(
-                                icon="edit_outlined", on_click=lambda c=cat: open_edit_dialog(c, refresh_all)
-                            ).props("flat round dense size=sm").style(f"color:{MUTED}")
-                            ui.button(
-                                icon="delete_outline",
-                                on_click=lambda c=cat: confirm_delete_category(c, refresh_all),
-                            ).props("flat round dense size=sm").style(f"color:{MUTED}")
+
+                        # A single menu button for all card actions — putting them
+                        # behind one click target (rather than icons living inside
+                        # the card's own click area) avoids fighting the card's
+                        # "open expenses" click handler for the same click.
+                        with ui.button(icon="more_vert").props("flat round dense size=sm").style(
+                            f"color:{MUTED}; flex: none;"
+                        ).on("click.stop", lambda: None):
+                            with ui.menu() as menu:
+                                with ui.menu_item(
+                                    on_click=lambda c=cat: (menu.close(), open_new_period_dialog(c, refresh_all))
+                                ):
+                                    with ui.row().classes("items-center").style("gap: 8px;"):
+                                        ui.icon("event_repeat", size="18px")
+                                        ui.label("Start next period")
+                                with ui.menu_item(
+                                    on_click=lambda c=cat: (
+                                        menu.close(),
+                                        toggle_active_and_refresh(c, False, refresh_all),
+                                    )
+                                ):
+                                    with ui.row().classes("items-center").style("gap: 8px;"):
+                                        ui.icon("toggle_off", size="18px")
+                                        ui.label("Deactivate")
+                                with ui.menu_item(
+                                    on_click=lambda c=cat: (menu.close(), open_edit_dialog(c, refresh_all))
+                                ):
+                                    with ui.row().classes("items-center").style("gap: 8px;"):
+                                        ui.icon("edit_outlined", size="18px")
+                                        ui.label("Edit")
+                                ui.separator()
+                                with ui.menu_item(
+                                    on_click=lambda c=cat: (menu.close(), confirm_delete_category(c, refresh_all))
+                                ):
+                                    with ui.row().classes("items-center").style(f"gap: 8px; color:{CRITICAL};"):
+                                        ui.icon("delete_outline", size="18px")
+                                        ui.label("Delete")
 
                     with ui.row().classes("items-center").style("gap: 6px;"):
                         ui.element("div").style(
@@ -893,6 +1062,140 @@ def add_category_page():
                 ui.button("Add category", icon="add", on_click=submit).props("unelevated no-caps").classes(
                     "accent-btn w-full"
                 ).style("margin-top: 4px; font-weight: 600;")
+
+
+# ---------------------------------------------------------------- Analysis page ----
+
+def echart_bar(labels: list[str], values: list[float], color: str = ACCENT, height: str = "260px"):
+    return ui.echart(
+        {
+            "grid": {"left": 50, "right": 16, "top": 20, "bottom": 32},
+            "xAxis": {
+                "type": "category",
+                "data": labels,
+                "axisLine": {"lineStyle": {"color": BORDER}},
+                "axisLabel": {"color": MUTED, "fontSize": 11},
+            },
+            "yAxis": {
+                "type": "value",
+                "axisLine": {"show": False},
+                "splitLine": {"lineStyle": {"color": BORDER, "type": "dashed"}},
+                "axisLabel": {"color": MUTED, "fontSize": 11, "formatter": "€{value}"},
+            },
+            "tooltip": {"trigger": "axis", "valueFormatter": "value => '€' + value.toFixed(2)"},
+            "series": [
+                {
+                    "type": "bar",
+                    "data": values,
+                    "itemStyle": {"color": color, "borderRadius": [4, 4, 0, 0]},
+                    "barMaxWidth": 36,
+                }
+            ],
+        }
+    ).style(f"width: 100%; height: {height};")
+
+
+@ui.page("/analysis")
+def analysis_page():
+    content = page_shell("/analysis")
+    with content:
+        with ui.column().classes("w-full").style("max-width: 900px; gap: 28px;"):
+            page_header("Analysis", "Month-over-month and year-over-year spend")
+
+            all_expenses = storage.get_expenses()
+
+            if not all_expenses:
+                with ui.column().classes("panel w-full items-center").style("padding: 40px 20px; gap: 6px;"):
+                    ui.icon("insights", size="28px").style(f"color:{MUTED}")
+                    ui.label("No spending logged yet").style(f"color:{INK}; font-weight: 600;")
+                    ui.label("Charts appear once you log a few expenses.").style(
+                        f"color:{MUTED}; font-size: 13px;"
+                    )
+            else:
+                # ---- Month over month ----
+                section_label("Month over month (all categories combined)")
+                m_totals = monthly_totals(all_expenses)
+                m_labels = [datetime.strptime(k, "%Y-%m").strftime("%b %Y") for k, _ in m_totals]
+                m_values = [round(v, 2) for _, v in m_totals]
+                with ui.column().classes("panel w-full").style("padding: 16px 8px 4px;"):
+                    echart_bar(m_labels, m_values)
+
+                # ---- Year over year ----
+                section_label("Year over year")
+                y_totals = yearly_totals(all_expenses)
+                y_labels = [k for k, _ in y_totals]
+                y_values = [round(v, 2) for _, v in y_totals]
+                with ui.column().classes("panel w-full").style("padding: 16px 8px 4px; margin-top: 4px;"):
+                    echart_bar(y_labels, y_values, color=GOOD, height="220px")
+
+                # ---- Per recurring category ----
+                section_label("By recurring category")
+                groups = category_groups()
+                with ui.column().classes("w-full").style("gap: 14px; margin-top: 4px;"):
+                    for name, periods in sorted(groups.items()):
+                        if len(periods) < 1:
+                            continue
+                        with ui.column().classes("panel w-full").style("padding: 16px 18px; gap: 10px;"):
+                            ui.label(name).style(f"font-weight: 600; font-size: 14.5px; color:{INK};")
+
+                            period_labels = [p.month_label for p in periods]
+                            spent_values = [round(storage.get_total_spent(p.id), 2) for p in periods]
+                            budget_values = [round(p.budget, 2) for p in periods]
+
+                            if len(periods) > 1:
+                                ui.echart(
+                                    {
+                                        "grid": {"left": 50, "right": 16, "top": 30, "bottom": 40},
+                                        "legend": {
+                                            "data": ["Budget", "Spent"],
+                                            "top": 0,
+                                            "textStyle": {"color": MUTED, "fontSize": 11},
+                                        },
+                                        "xAxis": {
+                                            "type": "category",
+                                            "data": period_labels,
+                                            "axisLabel": {"color": MUTED, "fontSize": 10.5},
+                                        },
+                                        "yAxis": {
+                                            "type": "value",
+                                            "axisLine": {"show": False},
+                                            "splitLine": {"lineStyle": {"color": BORDER, "type": "dashed"}},
+                                            "axisLabel": {"color": MUTED, "fontSize": 11, "formatter": "€{value}"},
+                                        },
+                                        "tooltip": {"trigger": "axis"},
+                                        "series": [
+                                            {
+                                                "name": "Budget",
+                                                "type": "bar",
+                                                "data": budget_values,
+                                                "itemStyle": {"color": ACCENT_SOFT},
+                                                "barMaxWidth": 28,
+                                            },
+                                            {
+                                                "name": "Spent",
+                                                "type": "line",
+                                                "data": spent_values,
+                                                "itemStyle": {"color": ACCENT},
+                                                "smooth": True,
+                                            },
+                                        ],
+                                    }
+                                ).style("width: 100%; height: 200px;")
+
+                            with ui.row().classes("w-full").style("gap: 0; overflow-x: auto;"):
+                                for p, spent, budget in zip(periods, spent_values, budget_values):
+                                    pct = (spent / budget * 100) if budget > 0 else 0
+                                    color = status_color(pct)
+                                    with ui.column().style(
+                                        f"padding: 4px 14px; gap: 2px; border-left: 1px solid {BORDER}; min-width: 110px;"
+                                    ):
+                                        ui.label(p.month_label).style(f"font-size: 10.5px; color:{MUTED};")
+                                        ui.label(f"{fmt_eur(spent)}").classes("tabular").style(
+                                            f"font-size: 13px; font-weight: 600; color:{color};"
+                                        )
+                                        ui.label(f"of {fmt_eur(budget)}").classes("tabular").style(
+                                            f"font-size: 10.5px; color:{MUTED};"
+                                        )
 
 
 # ---------------------------------------------------------------- Spending page ----
