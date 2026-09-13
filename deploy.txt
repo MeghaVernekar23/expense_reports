@@ -1,0 +1,8 @@
+sudo systemctl restart expense
+
+# Available nginx configs
+sudo nano /etc/nginx/sites-available/
+
+# Available backend systemd
+cd /etc/systemd/system
+ls -al
