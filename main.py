@@ -843,4 +843,4 @@ def open_edit_dialog(cat, on_change):
 
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(title="Nikhil and Megha Ledger", favicon="📒", reload=False)
+    ui.run(title="Nikhil and Megha Ledger", favicon="📒", port=9000, reload=False)
