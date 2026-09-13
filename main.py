@@ -1,4 +1,4 @@
-"""Nikhil and Megha Ledger — a multi-page NiceGUI expense dashboard."""
+"""Expense Report — a multi-page NiceGUI expense dashboard."""
 import csv
 import io
 import shutil
@@ -299,9 +299,30 @@ HEAD_HTML = f"""
        entirely so it doesn't waste vertical space over a visible sidebar. */
     .mobile-header {{ display: none; }}
     .page-content {{ width: 100%; padding: 28px 28px 64px; }}
+    /* Stat rows (totals bar): a responsive grid instead of a fixed-width
+       flex row, so numbers reflow to 2 then 1 column on narrow screens
+       instead of clipping or squeezing against each other. Cells get a
+       divider via border rather than a separate element, since a column
+       layout has no meaningful "vertical" divider to draw. */
+    .stat-grid {{
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 4px 0;
+    }}
+    .stat-cell {{
+        padding: 0 20px;
+        border-left: 1px solid var(--border);
+        min-width: 0;
+    }}
+    .stat-cell:first-child {{ border-left: none; padding-left: 0; }}
     @media (max-width: 900px) {{
         .mobile-header {{ display: flex; align-items: center; gap: 10px; padding: 8px 14px; }}
         .page-content {{ padding: 20px 14px 48px; }}
+    }}
+    @media (max-width: 560px) {{
+        .stat-grid {{ grid-template-columns: repeat(2, 1fr); gap: 14px 0; }}
+        .stat-cell:nth-child(2n+1) {{ border-left: none; padding-left: 0; }}
+        .stat-cell:nth-child(n+3) {{ border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 12px; }}
     }}
     ::selection {{ background: var(--accent-soft); }}
 </style>
@@ -330,9 +351,11 @@ def page_shell(active_path: str):
         ui.button(icon="menu", on_click=lambda: drawer.toggle()).props("flat round dense").style(
             f"color:{INK};"
         )
-        with ui.row().classes("items-center").style("gap: 8px;"):
+        with ui.row().classes("items-center").style("gap: 8px; cursor: pointer;").on(
+            "click", lambda: drawer.toggle()
+        ):
             ui.label("📒").style("font-size: 18px;")
-            ui.label("Nikhil & Megha Ledger").style(f"font-weight: 700; font-size: 14px; color:{INK};")
+            ui.label("Expense Report").style(f"font-weight: 700; font-size: 14px; color:{INK};")
 
     with ui.left_drawer(fixed=True, bordered=True).classes("app-sidebar").props(
         "width=220 breakpoint=900 show-if-above"
@@ -340,7 +363,7 @@ def page_shell(active_path: str):
         with ui.column().style("gap: 18px; padding: 20px 12px; height: 100%;"):
             with ui.row().classes("items-center").style("gap: 8px; padding: 0 6px;"):
                 ui.label("📒").style("font-size: 20px;")
-                ui.label("Nikhil & Megha").style(f"font-weight: 700; font-size: 14px; color:{INK};")
+                ui.label("Expense Report").style(f"font-weight: 700; font-size: 14px; color:{INK};")
 
             with ui.column().style("gap: 2px; margin-top: 8px;"):
                 for path, icon, label in NAV_ITEMS:
@@ -510,33 +533,25 @@ def render_totals(container: ui.column):
         # Active categories — what's switched on right now
         cur_budget, cur_spent, cur_remaining, cur_pct = totals_for(active_cats)
         ui.label("Active categories").classes("eyebrow").style("padding-left: 2px;")
-        with ui.row().classes("panel w-full items-stretch no-wrap").style(
-            "padding: 20px 24px; gap: 0; overflow-x: auto;"
-        ):
+        with ui.element("div").classes("panel stat-grid").style("padding: 20px 24px;"):
             stat("Total budget", fmt_eur(cur_budget), INK)
-            divider()
             stat("Spent", fmt_eur(cur_spent), status_color(cur_pct))
-            divider()
             stat(
                 "Remaining" if cur_remaining >= 0 else "Over budget",
                 fmt_eur(abs(cur_remaining)),
                 GOOD if cur_remaining >= 0 else CRITICAL,
             )
-            divider()
             stat("Utilised", f"{cur_pct:.0f}%", status_color(cur_pct))
 
         # All-time — every category, active or not, ever
         all_budget, all_spent, all_remaining, all_pct = totals_for(all_cats)
         ui.label("All-time overall").classes("eyebrow").style("padding-left: 2px; margin-top: 4px;")
-        with ui.row().classes("panel w-full items-stretch no-wrap").style(
-            "padding: 14px 24px; gap: 0; overflow-x: auto; background: var(--accent-soft);"
+        with ui.element("div").classes("panel stat-grid").style(
+            "padding: 14px 24px; background: var(--accent-soft);"
         ):
             stat_sm("Total spent", fmt_eur(all_spent), INK)
-            divider()
             stat_sm("Total budgeted", fmt_eur(all_budget), INK)
-            divider()
             stat_sm("Budget utilised", f"{all_pct:.0f}%", status_color(all_pct))
-            divider()
             stat_sm(
                 "Remaining" if all_remaining >= 0 else "Over budget",
                 fmt_eur(abs(all_remaining)),
@@ -545,19 +560,19 @@ def render_totals(container: ui.column):
 
 
 def stat(label: str, value: str, color: str):
-    with ui.column().style("gap: 4px; padding: 0 24px; min-width: 130px;"):
+    with ui.column().classes("stat-cell").style("gap: 4px;"):
         ui.label(label).classes("eyebrow")
-        ui.label(value).classes("display tabular").style(f"font-size: 24px; font-weight: 600; color: {color};")
+        ui.label(value).classes("display tabular").style(
+            f"font-size: 24px; font-weight: 600; color: {color}; overflow-wrap: anywhere;"
+        )
 
 
 def stat_sm(label: str, value: str, color: str):
-    with ui.column().style("gap: 2px; padding: 0 24px; min-width: 120px;"):
+    with ui.column().classes("stat-cell").style("gap: 2px;"):
         ui.label(label).classes("eyebrow")
-        ui.label(value).classes("tabular").style(f"font-size: 16px; font-weight: 600; color: {color};")
-
-
-def divider():
-    ui.element("div").classes("hairline").style("width: 1px; align-self: stretch; border-left: 1px solid;")
+        ui.label(value).classes("tabular").style(
+            f"font-size: 16px; font-weight: 600; color: {color}; overflow-wrap: anywhere;"
+        )
 
 
 def render_summary(container: ui.column, refresh_all):
