@@ -287,25 +287,21 @@ HEAD_HTML = f"""
     }}
     .side-link:hover {{ background: var(--accent-soft); color: var(--ink); }}
     .side-link.active {{ background: var(--accent); color: white; font-weight: 600; }}
-    .top-link {{
-        display: flex; align-items: center; gap: 6px;
-        padding: 6px 12px; border-radius: 7px;
-        color: var(--muted); font-size: 13px; font-weight: 500;
-        text-decoration: none; transition: background .12s ease, color .12s ease;
-        white-space: nowrap;
-    }}
-    .top-link:hover {{ background: var(--accent-soft); color: var(--ink); }}
-    .top-link.active {{ background: var(--accent-soft); color: var(--accent); font-weight: 700; }}
     .app-header {{
         background: var(--surface) !important;
         border-bottom: 1px solid var(--border);
         color: var(--ink) !important;
     }}
+    .app-sidebar {{ background: var(--surface) !important; }}
+    /* The top bar exists only to host the drawer toggle on narrow screens;
+       once the sidebar is permanently docked (Quasar's own >900px
+       breakpoint, matching left_drawer's `breakpoint=900`) it disappears
+       entirely so it doesn't waste vertical space over a visible sidebar. */
+    .mobile-header {{ display: none; }}
     .page-content {{ width: 100%; padding: 28px 28px 64px; }}
-    @media (max-width: 720px) {{
+    @media (max-width: 900px) {{
+        .mobile-header {{ display: flex; align-items: center; gap: 10px; padding: 8px 14px; }}
         .page-content {{ padding: 20px 14px 48px; }}
-        .top-link span.top-link-label {{ display: none; }}
-        .top-link {{ padding: 8px; }}
     }}
     ::selection {{ background: var(--accent-soft); }}
 </style>
@@ -321,31 +317,45 @@ NAV_ITEMS = [
 
 
 def page_shell(active_path: str):
-    """Renders the head styles, a top navigation bar, and opens the main
-    content column. Caller fills the content column via a `with` block
-    after calling this, or simply continues writing widgets — this
-    function itself opens the wrapping column context and returns it."""
+    """Renders the head styles, a left sidebar (permanent on desktop,
+    a toggleable overlay drawer on narrow screens) and a slim top bar
+    that only carries the menu toggle + brand on mobile. Caller fills
+    the content column via a `with` block after calling this, or simply
+    continues writing widgets — this function opens the wrapping column
+    context and returns it."""
     ui.add_head_html(HEAD_HTML)
     ui.page_title("Expense Report")
 
-    with ui.header().classes("app-header").props("elevated=false").style("padding: 0;"):
-        with ui.row().classes("w-full items-center no-wrap").style(
-            "max-width: 1080px; margin: 0 auto; padding: 10px 16px; gap: 6px;"
-        ):
-            with ui.row().classes("items-center").style("gap: 8px; flex: none;"):
-                ui.label("📒").style("font-size: 19px;")
-                ui.label("Nikhil & Megha Ledger").style(
-                    f"font-weight: 700; font-size: 14px; color:{INK}; white-space: nowrap;"
-                ).classes("gt-xs")
+    with ui.header().classes("app-header mobile-header").props("elevated=false"):
+        ui.button(icon="menu", on_click=lambda: drawer.toggle()).props("flat round dense").style(
+            f"color:{INK};"
+        )
+        with ui.row().classes("items-center").style("gap: 8px;"):
+            ui.label("📒").style("font-size: 18px;")
+            ui.label("Nikhil & Megha Ledger").style(f"font-weight: 700; font-size: 14px; color:{INK};")
+
+    with ui.left_drawer(fixed=True, bordered=True).classes("app-sidebar").props(
+        "width=220 breakpoint=900 show-if-above"
+    ) as drawer:
+        with ui.column().style("gap: 18px; padding: 20px 12px; height: 100%;"):
+            with ui.row().classes("items-center").style("gap: 8px; padding: 0 6px;"):
+                ui.label("📒").style("font-size: 20px;")
+                ui.label("Nikhil & Megha").style(f"font-weight: 700; font-size: 14px; color:{INK};")
+
+            with ui.column().style("gap: 2px; margin-top: 8px;"):
+                for path, icon, label in NAV_ITEMS:
+                    cls = "side-link active" if path == active_path else "side-link"
+                    with ui.link(target=path).classes(cls):
+                        ui.icon(icon, size="18px")
+                        ui.label(label)
 
             ui.element("div").style("flex: 1;")
 
-            with ui.row().classes("items-center no-wrap").style("gap: 2px; overflow-x: auto;"):
-                for path, icon, label in NAV_ITEMS:
-                    cls = "top-link active" if path == active_path else "top-link"
-                    with ui.link(target=path).classes(cls):
-                        ui.icon(icon, size="18px")
-                        ui.label(label).classes("top-link-label")
+            with ui.column().style("gap: 4px; padding: 0 6px;"):
+                ui.label(date.today().strftime("%A")).style(f"color:{MUTED}; font-size: 12px;")
+                ui.label(date.today().strftime("%d %B %Y")).style(
+                    f"color:{INK}; font-size: 12.5px; font-weight: 600;"
+                )
 
     with ui.column().classes("items-center").style("width: 100%; gap: 0;"):
         content = ui.column().classes("items-center page-content")
