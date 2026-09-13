@@ -385,6 +385,20 @@ def page_shell(active_path: str):
         return content
 
 
+def page_footer():
+    """Called by each page after its own content, so the footer always
+    lands after whatever the page put inside `content` rather than
+    before it."""
+    with ui.row().classes("items-center justify-center w-full").style(
+        f"gap: 6px; padding: 18px 20px 28px; color:{MUTED}; font-size: 12px; flex-wrap: wrap; text-align: center;"
+    ):
+        ui.label("📒 Expense Report")
+        ui.label("·").style(f"color:{BORDER}")
+        ui.label(f"© {date.today().year}")
+        ui.label("·").style(f"color:{BORDER}")
+        ui.label("Track budgets, spending & currency in one place")
+
+
 def page_header(title: str, subtitle: str, extra_actions=None):
     with ui.row().classes("w-full items-baseline justify-between").style("margin-bottom: 22px; gap: 10px; flex-wrap: wrap;"):
         with ui.column().style("gap: 2px;"):
@@ -430,6 +444,7 @@ def dashboard_page():
                 render_history(history_container, refresh_all)
 
             refresh_all()
+    page_footer()
 
 
 def render_dashboard_charts(container: ui.column):
@@ -628,12 +643,11 @@ def render_summary(container: ui.column, refresh_all):
                             # Log a spend is the primary quick action, so it gets
                             # its own always-visible button (pre-filled with this
                             # category) rather than living inside the ⋮ menu.
-                            ui.button(
-                                icon="add_card",
-                                on_click=lambda c=cat: open_quick_log_dialog(c, refresh_all),
-                            ).props("flat round dense size=sm").style(f"color:{ACCENT}").tooltip(
-                                "Log a spend"
-                            ).on("click.stop", lambda: None)
+                            ui.button(icon="add_card").props("flat round dense size=sm").style(
+                                f"color:{ACCENT}"
+                            ).tooltip("Log a spend").on(
+                                "click.stop", lambda c=cat: open_quick_log_dialog(c, refresh_all)
+                            )
 
                             # A single menu button for the remaining, less-frequent
                             # actions — putting them behind one click target (rather
@@ -1118,6 +1132,7 @@ def add_category_page():
                 ui.button("Add category", icon="add", on_click=submit).props("unelevated no-caps").classes(
                     "accent-btn w-full"
                 ).style("margin-top: 4px; font-weight: 600;")
+    page_footer()
 
 
 # ---------------------------------------------------------------- Analysis page ----
@@ -1252,6 +1267,7 @@ def analysis_page():
                                         ui.label(f"of {fmt_eur(budget)}").classes("tabular").style(
                                             f"font-size: 10.5px; color:{MUTED};"
                                         )
+    page_footer()
 
 
 # ---------------------------------------------------------------- Spending page ----
@@ -1300,6 +1316,7 @@ def spending_page():
             category_filter.on_value_change(refresh)
             currency_filter.on_value_change(refresh)
             refresh()
+    page_footer()
 
 
 # ---------------------------------------------------------------- Log a spend page ----
@@ -1312,6 +1329,7 @@ def log_spend_page():
             page_header("Log a spend", "Every expense needs an active category")
             form_container = ui.column().classes("w-full")
             render_log_spend_form(form_container)
+    page_footer()
 
 
 def render_log_spend_form(container: ui.column, preselect_category_id: int | None = None, on_saved=None):
