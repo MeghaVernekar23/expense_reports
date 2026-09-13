@@ -256,6 +256,7 @@ HEAD_HTML = f"""
         border: 1px solid var(--border);
         border-radius: 10px;
         box-shadow: 0 1px 2px rgba(28, 35, 51, 0.04);
+        box-sizing: border-box;
     }}
     .stripe-card {{
         background: var(--surface);
@@ -280,8 +281,8 @@ HEAD_HTML = f"""
     .q-list, .q-item {{ background: transparent !important; }}
     .q-item {{ border-color: var(--border) !important; }}
     .side-link {{
-        display: flex; align-items: center; gap: 10px;
-        padding: 9px 14px; border-radius: 8px;
+        display: flex; align-items: center; gap: 10px; width: 100%;
+        padding: 9px 14px; border-radius: 8px; box-sizing: border-box;
         color: var(--muted); font-size: 13.5px; font-weight: 500;
         text-decoration: none; transition: background .12s ease, color .12s ease;
     }}
@@ -548,7 +549,7 @@ def render_totals(container: ui.column):
         # Active categories — what's switched on right now
         cur_budget, cur_spent, cur_remaining, cur_pct = totals_for(active_cats)
         ui.label("Active categories").classes("eyebrow").style("padding-left: 2px;")
-        with ui.element("div").classes("panel stat-grid").style("padding: 20px 24px;"):
+        with ui.element("div").classes("panel stat-grid w-full").style("padding: 20px 24px;"):
             stat("Total budget", fmt_eur(cur_budget), INK)
             stat("Spent", fmt_eur(cur_spent), status_color(cur_pct))
             stat(
@@ -561,7 +562,7 @@ def render_totals(container: ui.column):
         # All-time — every category, active or not, ever
         all_budget, all_spent, all_remaining, all_pct = totals_for(all_cats)
         ui.label("All-time overall").classes("eyebrow").style("padding-left: 2px; margin-top: 4px;")
-        with ui.element("div").classes("panel stat-grid").style(
+        with ui.element("div").classes("panel stat-grid w-full").style(
             "padding: 14px 24px; background: var(--accent-soft);"
         ):
             stat_sm("Total spent", fmt_eur(all_spent), INK)
