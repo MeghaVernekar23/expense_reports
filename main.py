@@ -45,6 +45,15 @@ CRITICAL = "#B0413E"
 
 CURRENCY_SYMBOLS = {"EUR": "€", "INR": "₹"}
 
+CATEGORY_NAME_OPTIONS = [
+    "Credit Card",
+    "General",
+    "Outside Food",
+    "Personal-Nikhil",
+    "Personal-Megha",
+    "Others",
+]
+
 
 def fmt_money(v: float, currency: str = "EUR") -> str:
     symbol = CURRENCY_SYMBOLS.get(currency, "")
@@ -222,6 +231,49 @@ def download_everything():
     ui.download(data, filename=f"ledger-export-{date.today().isoformat()}.zip")
 
 
+def build_category_export_zip(cat) -> bytes:
+    """Package one category's expenses + its bill files into a zip:
+    expenses.csv and bills/<file>. Mirrors build_export_zip but scoped
+    to a single category, for the per-card download on Past categories."""
+    expenses = storage.get_expenses(cat.id)
+
+    exp_buf = io.StringIO()
+    exp_writer = csv.writer(exp_buf)
+    exp_writer.writerow(
+        ["id", "date", "category", "amount", "currency", "amount_eur", "fx_rate_inr_per_eur", "note", "bill_file"]
+    )
+    for e in expenses:
+        exp_writer.writerow(
+            [
+                e.id,
+                e.spent_on,
+                e.category_name,
+                f"{e.amount:.2f}",
+                e.currency,
+                f"{e.amount_eur:.2f}",
+                f"{e.fx_rate:.4f}" if e.fx_rate else "",
+                e.note or "",
+                e.bill_path or "",
+            ]
+        )
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("expenses.csv", exp_buf.getvalue())
+        for e in expenses:
+            if e.bill_path:
+                bill_file = BILLS_DIR / e.bill_path
+                if bill_file.exists():
+                    zf.write(bill_file, f"bills/{e.bill_path}")
+    return zip_buf.getvalue()
+
+
+def download_category(cat):
+    data = build_category_export_zip(cat)
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in cat.name)
+    ui.download(data, filename=f"{safe_name}-{cat.month_label}-{cat.id}.zip".replace(" ", "_"))
+
+
 # ---------------------------------------------------------------- shared page shell ----
 
 HEAD_HTML = f"""
@@ -333,6 +385,7 @@ NAV_ITEMS = [
     ("/", "space_dashboard", "Dashboard"),
     ("/spending", "receipt_long", "Spending"),
     ("/analysis", "insights", "Analysis"),
+    ("/past-categories", "inventory_2", "Past categories"),
     ("/add-category", "add_box", "Add category"),
     ("/log-spend", "add_card", "Log a spend"),
 ]
@@ -1074,7 +1127,12 @@ def add_category_page():
             page_header("Add category", "Set a budget and, optionally, a billing period")
 
             with ui.column().classes("panel w-full").style("padding: 22px 24px; gap: 14px;"):
-                name_input = ui.input("Category name").props("outlined dense").classes("w-full")
+                name_select = ui.select(
+                    CATEGORY_NAME_OPTIONS, label="Category name", value=CATEGORY_NAME_OPTIONS[0]
+                ).props("outlined dense").classes("w-full")
+                other_name_input = ui.input("Custom category name").props("outlined dense").classes("w-full")
+                other_name_input.bind_visibility_from(name_select, "value", value="Others")
+
                 budget_input = ui.number("Budget amount (€)", min=0, format="%.2f").props(
                     "outlined dense"
                 ).classes("w-full")
@@ -1108,7 +1166,10 @@ def add_category_page():
                 )
 
                 def submit():
-                    if not name_input.value or not name_input.value.strip():
+                    chosen_name = (
+                        other_name_input.value if name_select.value == "Others" else name_select.value
+                    )
+                    if not chosen_name or not chosen_name.strip():
                         ui.notify("Category name is required", color="negative")
                         return
                     try:
@@ -1117,13 +1178,14 @@ def add_category_page():
                         ui.notify("Enter a valid budget", color="negative")
                         return
                     storage.add_category(
-                        name_input.value,
+                        chosen_name,
                         budget_val,
                         start_input.value or None,
                         end_input.value or None,
                         active_switch.value,
                     )
-                    name_input.value = ""
+                    name_select.value = CATEGORY_NAME_OPTIONS[0]
+                    other_name_input.value = ""
                     budget_input.value = None
                     start_input.value = None
                     end_input.value = None
@@ -1268,6 +1330,102 @@ def analysis_page():
                                         ui.label(f"of {fmt_eur(budget)}").classes("tabular").style(
                                             f"font-size: 10.5px; color:{MUTED};"
                                         )
+    page_footer()
+
+
+# ---------------------------------------------------------------- Past categories page ----
+
+@ui.page("/past-categories")
+def past_categories_page():
+    content = page_shell("/past-categories")
+    with content:
+        with ui.column().classes("w-full").style("max-width: 980px; gap: 24px;"):
+            page_header("Past categories", "Deactivated periods — no longer shown on the dashboard")
+
+            list_container = ui.column().classes("w-full")
+
+            def refresh():
+                list_container.clear()
+                past_cats = [c for c in storage.get_categories() if not is_active_period(c)]
+                with list_container:
+                    if not past_cats:
+                        with ui.column().classes("panel w-full items-center").style("padding: 40px 20px; gap: 6px;"):
+                            ui.icon("inventory_2", size="28px").style(f"color:{MUTED}")
+                            ui.label("No past categories yet").style(f"color:{INK}; font-weight: 600;")
+                            ui.label("Deactivate a category from the dashboard to move it here.").style(
+                                f"color:{MUTED}; font-size: 13px;"
+                            )
+                        return
+
+                    # Group by the calendar month each period *starts* in, so a
+                    # Sep-Oct card files under September rather than October.
+                    months: dict[str, list] = {}
+                    for cat in past_cats:
+                        start = parse_date(cat.period_start)
+                        key = start.strftime("%Y-%m") if start else "No date"
+                        months.setdefault(key, []).append(cat)
+
+                    def month_sort_key(k: str):
+                        return k if k != "No date" else ""
+
+                    for key in sorted(months.keys(), key=month_sort_key, reverse=True):
+                        group = months[key]
+                        label = (
+                            datetime.strptime(key, "%Y-%m").strftime("%B %Y") if key != "No date" else "No start date"
+                        )
+                        with ui.column().classes("w-full").style("gap: 10px;"):
+                            section_label(label)
+                            with ui.grid(columns="repeat(auto-fit, minmax(280px, 1fr))").classes("w-full").style(
+                                "gap: 12px;"
+                            ):
+                                for cat in group:
+                                    spent = storage.get_total_spent(cat.id)
+                                    budget = cat.budget or 0
+                                    pct_used = (spent / budget * 100) if budget > 0 else 0
+                                    color = status_color(pct_used)
+
+                                    with ui.column().classes("stripe-card inactive").style(
+                                        f"border-left-color: {color}; padding: 16px 18px; gap: 10px;"
+                                    ):
+                                        with ui.row().classes("w-full items-center justify-between no-wrap").style(
+                                            "gap: 8px;"
+                                        ):
+                                            with ui.column().style("gap: 1px; min-width: 0; cursor: pointer;").on(
+                                                "click", lambda c=cat: open_category_expenses_dialog(c, refresh)
+                                            ):
+                                                ui.label(cat.name).style(
+                                                    f"font-weight: 600; font-size: 15px; color: {INK};"
+                                                )
+                                                ui.label(cat.month_label).style(f"font-size: 11px; color:{MUTED};")
+
+                                            with ui.row().style("gap: 2px; flex: none;"):
+                                                ui.button(
+                                                    icon="download",
+                                                    on_click=lambda c=cat: download_category(c),
+                                                ).props("flat round dense size=sm").style(f"color:{ACCENT}").tooltip(
+                                                    "Download this category"
+                                                )
+                                                ui.button(
+                                                    icon="toggle_on",
+                                                    on_click=lambda c=cat: toggle_active_and_refresh(c, True, refresh),
+                                                ).props("flat round dense size=sm").style(f"color:{MUTED}").tooltip(
+                                                    "Reactivate"
+                                                )
+                                                ui.button(
+                                                    icon="delete_outline",
+                                                    on_click=lambda c=cat: confirm_delete_category(c, refresh),
+                                                ).props("flat round dense size=sm").style(f"color:{CRITICAL}").tooltip(
+                                                    "Delete"
+                                                )
+
+                                        ui.label(f"{fmt_eur(spent)} of {fmt_eur(budget)}").classes("tabular").style(
+                                            f"font-size: 13px; color: {MUTED};"
+                                        )
+                                        ui.label(f"{pct_used:.0f}% utilised").classes("tabular").style(
+                                            f"font-size: 12.5px; font-weight: 600; color: {color};"
+                                        )
+
+            refresh()
     page_footer()
 
 
