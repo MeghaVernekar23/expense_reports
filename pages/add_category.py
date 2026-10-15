@@ -1,7 +1,10 @@
 """Add category page: name (dropdown of common categories, or free text via
 "Others"), budget, optional billing period, active switch."""
+from datetime import date
+
 from nicegui import ui
 
+import fx
 import storage
 from shell import page_footer, page_header, page_shell
 from theme import CATEGORY_NAME_OPTIONS, MUTED
@@ -21,9 +24,13 @@ def add_category_page():
                 other_name_input = ui.input("Custom category name").props("outlined dense").classes("w-full")
                 other_name_input.bind_visibility_from(name_select, "value", value="Others")
 
-                budget_input = ui.number("Budget amount (€)", min=0, format="%.2f").props(
-                    "outlined dense"
-                ).classes("w-full")
+                with ui.row().classes("w-full").style("gap: 10px;"):
+                    budget_input = ui.number("Budget amount", min=0, format="%.2f").props(
+                        "outlined dense"
+                    ).style("flex: 1 1 auto;")
+                    currency_select = ui.select(["EUR", "INR"], value="EUR").props(
+                        "outlined dense"
+                    ).style("width: 100px;")
 
                 ui.label("Period (optional)").style(f"font-size: 11.5px; color:{MUTED}; margin-top: 2px;")
                 with ui.row().classes("w-full").style("gap: 10px; flex-wrap: wrap;"):
@@ -69,9 +76,12 @@ def add_category_page():
                     except (TypeError, ValueError):
                         ui.notify("Enter a valid budget", color="negative")
                         return
+                    budget_eur, _ = fx.convert_to_eur(
+                        budget_val, currency_select.value, date.today().isoformat()
+                    )
                     storage.add_category(
                         chosen_name,
-                        budget_val,
+                        budget_eur,
                         start_input.value or None,
                         end_input.value or None,
                         active_switch.value,
@@ -79,6 +89,7 @@ def add_category_page():
                     name_select.value = CATEGORY_NAME_OPTIONS[0]
                     other_name_input.value = ""
                     budget_input.value = None
+                    currency_select.value = "EUR"
                     start_input.value = None
                     end_input.value = None
                     active_switch.value = True
