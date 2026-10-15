@@ -24,6 +24,11 @@ class Category(Base):
     # (e.g. "Food" for 13 Sep - 13 Oct, then again for 13 Oct - 13 Nov)
     name: Mapped[str] = mapped_column(String, nullable=False)
     budget: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    # currency/amount_native remember what the user actually typed (display
+    # only); `budget` above is always the EUR-converted value and is what
+    # every sum/percentage/pace calculation uses.
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="EUR")
+    amount_native: Mapped[float | None] = mapped_column(Float, nullable=True)
     period_start: Mapped[str | None] = mapped_column(String, nullable=True)
     period_end: Mapped[str | None] = mapped_column(String, nullable=True)
     # manual on/off switch — independent of the period dates. Only active
@@ -53,6 +58,14 @@ class Expense(Base):
 
 def init_db():
     Base.metadata.create_all(engine)
+    # Lightweight migration: older DBs predate currency/amount_native.
+    with engine.connect() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(categories)")}
+        if "currency" not in cols:
+            conn.exec_driver_sql("ALTER TABLE categories ADD COLUMN currency VARCHAR NOT NULL DEFAULT 'EUR'")
+        if "amount_native" not in cols:
+            conn.exec_driver_sql("ALTER TABLE categories ADD COLUMN amount_native FLOAT")
+        conn.commit()
 
 
 # ---------------------------------------------------------------- Schemas ----
@@ -60,6 +73,8 @@ def init_db():
 class CategoryIn(BaseModel):
     name: str = Field(min_length=1)
     budget: float = Field(ge=0)
+    currency: str = Field(default="EUR", pattern="^(EUR|INR)$")
+    amount_native: float | None = None
     period_start: str | None = None
     period_end: str | None = None
     is_active: bool = True
@@ -71,6 +86,8 @@ class CategoryOut(BaseModel):
     id: int
     name: str
     budget: float
+    currency: str
+    amount_native: float | None
     period_start: str | None
     period_end: str | None
     is_active: bool

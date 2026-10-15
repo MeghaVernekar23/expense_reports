@@ -85,6 +85,8 @@ def add_category_page():
                         start_input.value or None,
                         end_input.value or None,
                         active_switch.value,
+                        currency_select.value,
+                        budget_val,
                     )
                     name_select.value = CATEGORY_NAME_OPTIONS[0]
                     other_name_input.value = ""

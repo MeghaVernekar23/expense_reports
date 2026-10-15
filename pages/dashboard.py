@@ -1,7 +1,10 @@
 """Dashboard page: active-category totals, charts, category cards, recent
 spending — the app's landing page."""
+from datetime import date
+
 from nicegui import ui
 
+import fx
 import storage
 from components import (
     confirm_delete_category,
@@ -290,6 +293,12 @@ def render_summary(container: ui.column, refresh_all):
                         )
                         ui.label(f"{pct_used:.0f}%").classes("tabular").style(
                             f"font-size: 13px; font-weight: 600; color: {color};"
+                        )
+
+                    if cat.currency == "INR":
+                        spent_inr = fx.convert_from_eur(spent, date.today().isoformat())
+                        ui.label(f"{spent_inr:,.0f} of {cat.amount_native:,.0f} INR used").classes("tabular").style(
+                            f"font-size: 11.5px; color: {MUTED};"
                         )
 
                     remaining_label = (

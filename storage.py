@@ -1,10 +1,15 @@
 """Data access layer — SQLAlchemy for persistence, Pydantic for validated I/O.
 
 No raw SQL: all queries go through the ORM session; all data crossing the
-boundary into/out of this module is a Pydantic model. Budgets live in EUR;
-expenses may be logged in EUR or INR and are converted to EUR (via fx.py,
-using that day's rate) before being stored, so all spend/remaining math
-stays in one currency.
+boundary into/out of this module is a Pydantic model. Budgets are always
+stored and compared in EUR; expenses may be logged in EUR or INR and are
+converted to EUR (via fx.py, using that day's rate) before being stored, so
+all spend/remaining math stays in one currency.
+
+A category also remembers the currency/amount the user originally typed
+(`currency` + `amount_native`), purely for display on the dashboard card —
+the stored `budget` field is always the EUR-converted value, and that's
+what all math uses.
 """
 from contextlib import contextmanager
 
@@ -57,9 +62,14 @@ def _to_expense_out(e: Expense) -> ExpenseOut:
 # ---------- Categories ----------
 
 def add_category(
-    name: str, budget: float, start: str | None, end: str | None, is_active: bool = True
+    name: str, budget: float, start: str | None, end: str | None, is_active: bool = True,
+    currency: str = "EUR", amount_native: float | None = None,
 ) -> CategoryOut:
-    data = CategoryIn(name=name.strip(), budget=budget, period_start=start, period_end=end, is_active=is_active)
+    data = CategoryIn(
+        name=name.strip(), budget=budget, currency=currency,
+        amount_native=amount_native if amount_native is not None else budget,
+        period_start=start, period_end=end, is_active=is_active,
+    )
     with get_session() as session:
         category = Category(**data.model_dump())
         session.add(category)
@@ -68,7 +78,8 @@ def add_category(
 
 
 def update_category(
-    cat_id: int, name: str, budget: float, start: str | None, end: str | None, is_active: bool | None = None
+    cat_id: int, name: str, budget: float, start: str | None, end: str | None, is_active: bool | None = None,
+    currency: str | None = None, amount_native: float | None = None,
 ) -> CategoryOut | None:
     with get_session() as session:
         category = session.get(Category, cat_id)
@@ -77,6 +88,10 @@ def update_category(
         data = CategoryIn(
             name=name.strip(),
             budget=budget,
+            currency=category.currency if currency is None else currency,
+            amount_native=category.amount_native if currency is None else (
+                amount_native if amount_native is not None else budget
+            ),
             period_start=start,
             period_end=end,
             is_active=category.is_active if is_active is None else is_active,

@@ -259,10 +259,15 @@ def open_all_periods_dialog():
                                     ui.label("Active" if active else "Inactive").style(
                                         f"font-size: 10.5px; color: {ACCENT if active else MUTED}; font-weight: 600;"
                                     )
-                                with ui.row().classes("items-center").style("gap: 10px;"):
+                                with ui.column().style("gap: 0; align-items: flex-end;"):
                                     ui.label(f"{fmt_eur(spent)} / {fmt_eur(c.budget)}").classes("tabular").style(
                                         f"font-size: 12.5px; color:{color}; font-weight: 600;"
                                     )
+                                    if c.currency == "INR":
+                                        spent_inr = fx.convert_from_eur(spent, date.today().isoformat())
+                                        ui.label(f"{spent_inr:,.0f} of {c.amount_native:,.0f} INR used").classes(
+                                            "tabular"
+                                        ).style(f"font-size: 10.5px; color:{MUTED};")
                                     ui.switch(
                                         value=active,
                                         on_change=lambda e, cid=c.id: (
@@ -292,10 +297,12 @@ def open_new_period_dialog(cat, on_change):
     ):
         ui.label(f'New period for "{cat.name}"').style(f"font-weight: 600; color:{INK}; font-size: 15px;")
         with ui.row().classes("w-full").style("gap: 10px;"):
-            budget_input = ui.number("Budget amount", value=cat.budget, min=0, format="%.2f").props(
+            budget_input = ui.number(
+                "Budget amount", value=cat.amount_native or cat.budget, min=0, format="%.2f"
+            ).props("outlined dense").style("flex: 1 1 auto;")
+            currency_select = ui.select(["EUR", "INR"], value=cat.currency).props(
                 "outlined dense"
-            ).style("flex: 1 1 auto;")
-            currency_select = ui.select(["EUR", "INR"], value="EUR").props("outlined dense").style("width: 100px;")
+            ).style("width: 100px;")
 
         with ui.row().classes("w-full").style("gap: 10px; flex-wrap: wrap;"):
             start_input = ui.input("Start date", value=next_start.isoformat()).props(
@@ -324,14 +331,16 @@ def open_new_period_dialog(cat, on_change):
             ui.button("Cancel", on_click=dialog.close).props("flat no-caps").style(f"color:{MUTED}")
 
             def create():
-                budget_eur, _ = fx.convert_to_eur(
-                    float(budget_input.value or 0), currency_select.value, date.today().isoformat()
-                )
+                native_amount = float(budget_input.value or 0)
+                budget_eur, _ = fx.convert_to_eur(native_amount, currency_select.value, date.today().isoformat())
                 storage.add_category(
                     cat.name,
                     budget_eur,
                     start_input.value or None,
                     end_input.value or None,
+                    True,
+                    currency_select.value,
+                    native_amount,
                 )
                 dialog.close()
                 ui.notify(f'New "{cat.name}" period created', color="positive")
@@ -348,10 +357,12 @@ def open_edit_dialog(cat, on_change):
         ui.label("Edit category").style(f"font-weight: 600; color:{INK}; font-size: 15px;")
         name_input = ui.input("Category name", value=cat.name).props("outlined dense").classes("w-full")
         with ui.row().classes("w-full").style("gap: 10px;"):
-            budget_input = ui.number("Budget amount", value=cat.budget, min=0, format="%.2f").props(
+            budget_input = ui.number(
+                "Budget amount", value=cat.amount_native or cat.budget, min=0, format="%.2f"
+            ).props("outlined dense").style("flex: 1 1 auto;")
+            currency_select = ui.select(["EUR", "INR"], value=cat.currency).props(
                 "outlined dense"
-            ).style("flex: 1 1 auto;")
-            currency_select = ui.select(["EUR", "INR"], value="EUR").props("outlined dense").style("width: 100px;")
+            ).style("width: 100px;")
 
         with ui.row().classes("w-full").style("gap: 10px; flex-wrap: wrap;"):
             start_input = ui.input("Start date", value=cat.period_start).props("outlined dense readonly").style(
@@ -386,9 +397,8 @@ def open_edit_dialog(cat, on_change):
                 if not name_input.value or not name_input.value.strip():
                     ui.notify("Name required", color="negative")
                     return
-                budget_eur, _ = fx.convert_to_eur(
-                    float(budget_input.value or 0), currency_select.value, date.today().isoformat()
-                )
+                native_amount = float(budget_input.value or 0)
+                budget_eur, _ = fx.convert_to_eur(native_amount, currency_select.value, date.today().isoformat())
                 storage.update_category(
                     cat.id,
                     name_input.value,
@@ -396,6 +406,8 @@ def open_edit_dialog(cat, on_change):
                     start_input.value or None,
                     end_input.value or None,
                     active_switch.value,
+                    currency_select.value,
+                    native_amount,
                 )
                 dialog.close()
                 ui.notify("Category updated", color="positive")
