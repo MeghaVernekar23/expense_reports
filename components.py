@@ -47,9 +47,9 @@ def render_expense_row(e, on_change, show_category: bool = True):
             sub = e.spent_on
             if e.note:
                 sub += f"  ·  {e.note}"
-            ui.label(sub).style(
+            ui.label(sub).tooltip(sub).style(
                 f"font-size: {'12px' if show_category else '13px'}; color:{MUTED if show_category else INK};"
-                " white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+                " display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
                 f"{'font-weight: 500;' if not show_category else ''}"
             )
 
